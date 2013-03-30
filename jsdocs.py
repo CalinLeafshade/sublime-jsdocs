@@ -54,6 +54,8 @@ def getParser(view):
         return JsdocsPHP(viewSettings)
     elif sourceLang == "coffee":
         return JsdocsCoffee(viewSettings)
+    elif sourceLang == "lua":
+        return JsdocsLua(viewSettings)
     elif sourceLang == "actionscript" or sourceLang == 'haxe':
         return JsdocsActionscript(viewSettings)
     elif sourceLang == "c++" or sourceLang == 'c' or sourceLang == 'cuda-c++':
@@ -193,7 +195,7 @@ class JsdocsCommand(sublime_plugin.TextCommand):
 
     def createSnippet(self, out):
         snippet = ""
-        closer = self.parser.settings['commentCloser']
+        closer = self.parser.settings.get('commentCloser', False)
         if out:
             if self.settings.get('jsdocs_spacer_between_sections'):
                 lastTag = None
@@ -202,12 +204,17 @@ class JsdocsCommand(sublime_plugin.TextCommand):
                     if res and (lastTag != res.group(1)):
                         lastTag = res.group(1)
                         out.insert(idx, "")
-            for line in out:
-                snippet += "\n " + self.prefix + (self.indentSpaces + line if line else "")
+            for idx, line in enumerate(out):
+                if idx == 0:
+                    snippet += "" if self.parser.settings.get('noNewLineOnFirst', False) else "\n"
+                    snippet += "" if self.parser.settings.get('noPrefixOnFirst', False) else self.parser.settings['linePrefix']
+                else:
+                    snippet += "\n" + self.parser.settings['linePrefix']
+                snippet += (self.indentSpaces + line if line else "")
         else:
-            snippet += "\n " + self.prefix + self.indentSpaces + "${0:" + self.trailingString + '}'
+            snippet += "\n" + self.parser.settings['linePrefix'] + self.indentSpaces + "${0:" + self.trailingString + '}'
 
-        snippet += "\n" + closer
+        snippet += ("\n" + closer) if closer else "" # No newline if closer is null like in Lua
         return snippet
 
 
@@ -444,21 +451,21 @@ class JsdocsParser(object):
         return definition
 
 
-class JsdocsJavascript(JsdocsParser):
+class JsdocsLua(JsdocsParser):
     def setupSettings(self):
-        identifier = '[a-zA-Z_$][a-zA-Z_$0-9]*'
+        identifier = '[a-zA-Z_$][\\.:a-zA-Z_$0-9]*'
         self.settings = {
             # curly brackets around the type information
-            "curlyTypes": True,
-            'typeInfo': True,
-            "typeTag": "type",
+            "curlyTypes": False,
+            'typeInfo': False,
+            "typeTag": "class",
             # technically, they can contain all sorts of unicode, but w/e
             "varIdentifier": identifier,
             "fnIdentifier":  identifier,
+            "linePrefix": '--',
+            "noNewLineOnFirst": True,
+            "noPrefixOnFirst": True,
             "fnOpener": 'function(?:\\s+' + identifier + ')?\\s*\\(',
-            "commentCloser": " */",
-            "bool": "Boolean",
-            "function": "Function"
         }
 
     def parseFunction(self, line):
@@ -503,17 +510,10 @@ class JsdocsJavascript(JsdocsParser):
             return "Number"
         if val[0] == '"' or val[0] == "'":
             return "String"
-        if val[0] == '[':
-            return "Array"
         if val[0] == '{':
-            return "Object"
+            return "Table"
         if val == 'true' or val == 'false':
             return 'Boolean'
-        if re.match('RegExp\\b|\\/[^\\/]', val):
-            return 'RegExp'
-        if val[:4] == 'new ':
-            res = re.search('new (' + self.settings['fnIdentifier'] + ')', val)
-            return res and res.group(1) or None
         return None
 
 
@@ -529,6 +529,7 @@ class JsdocsPHP(JsdocsParser):
             'fnIdentifier': nameToken,
             'fnOpener': 'function(?:\\s+' + nameToken + ')?\\s*\\(',
             'commentCloser': ' */',
+            "linePrefix": '*',
             'bool': "boolean",
             'function': "function"
         }
@@ -628,6 +629,7 @@ class JsdocsCPP(JsdocsParser):
             'fnIdentifier': identifier,
             'varIdentifier': identifier,
             'fnOpener': identifier + '\\s+' + identifier + '\\s*\\(',
+            "linePrefix": '*',
             'bool': 'bool',
             'function': 'function'
         }
@@ -679,6 +681,7 @@ class JsdocsCoffee(JsdocsParser):
             'varIdentifier': identifier,
             'fnIdentifier': identifier,
             'fnOpener': None,  # no multi-line function definitions for you, hipsters!
+            "linePrefix": '*',
             'commentCloser': '###',
             'bool': 'Boolean',
             'function': 'Function'
@@ -746,6 +749,7 @@ class JsdocsActionscript(JsdocsParser):
             'typeTag': '',
             'commentCloser': ' */',
             'fnIdentifier': nameToken,
+            "linePrefix": '*',
             'varIdentifier': '(%s)(?::%s)?' % (nameToken, nameToken),
             'fnOpener': 'function(?:\\s+[gs]et)?(?:\\s+' + nameToken + ')?\\s*\\(',
             'bool': 'bool',
@@ -801,6 +805,7 @@ class JsdocsObjC(JsdocsParser):
             "varIdentifier": identifier,
             "fnIdentifier":  identifier,
             "fnOpener": '^\s*[-+]',
+            "linePrefix": '*',
             "commentCloser": " */",
             "bool": "Boolean",
             "function": "Function"
@@ -886,6 +891,7 @@ class JsdocsJava(JsdocsParser):
             "fnIdentifier":  identifier,
             "fnOpener": identifier + '(?:\\s+' + identifier + ')?\\s*\\(',
             "commentCloser": " */",
+            "linePrefix": '*',
             "bool": "Boolean",
             "function": "Function"
         }
@@ -996,7 +1002,7 @@ class JsdocsJava(JsdocsParser):
                 break
         return definition
 
-############################################################33
+##############################################################
 
 
 class JsdocsIndentCommand(sublime_plugin.TextCommand):
